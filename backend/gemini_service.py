@@ -14,7 +14,7 @@ if api_key:
 else:
     print("Warning: GEMINI_API_KEY not found in environment variables")
 
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-flash-latest')
 
 def analyze_image(base64_image: str, prompt: str) -> str:
     """
@@ -38,6 +38,30 @@ def analyze_image(base64_image: str, prompt: str) -> str:
     except Exception as e:
         print(f"Error calling Gemini: {e}")
         return "Error generating commentary."
+
+def analyze_image_stream(base64_image: str, prompt: str):
+    """
+    Streams commentary from Gemini Vision.
+    """
+    try:
+        # Remove header if present
+        if "base64," in base64_image:
+            base64_image = base64_image.split("base64,")[1]
+
+        image_data = base64.b64decode(base64_image)
+        
+        image_part = {
+            "mime_type": "image/jpeg",
+            "data": image_data
+        }
+
+        response = model.generate_content([prompt, image_part], stream=True)
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
+    except Exception as e:
+        print(f"Error calling Gemini stream: {e}")
+        yield "Error generating commentary."
 
 def text_to_speech(text: str) -> str:
     """

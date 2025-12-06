@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from gemini_service import analyze_image, text_to_speech
+from gemini_service import analyze_image, analyze_image_stream, text_to_speech
 from prompts import CHESS_COMMENTATOR_PROMPT
 import uvicorn
 
@@ -18,15 +19,20 @@ app.add_middleware(
 
 class ImageRequest(BaseModel):
     image: str
+    skip_audio: bool = False
 
 @app.post("/analyze")
 async def analyze(request: ImageRequest):
+    print(f"📥 Received request. Skip audio: {request.skip_audio}", flush=True)
     try:
         # 1. Get Commentary from Gemini
         commentary_text = analyze_image(request.image, CHESS_COMMENTATOR_PROMPT)
+        print(f"\n💬 Commentary: {commentary_text}\n", flush=True)
         
         # 2. Convert to Speech
-        audio_base64 = text_to_speech(commentary_text)
+        audio_base64 = None
+        if not request.skip_audio:
+            audio_base64 = text_to_speech(commentary_text)
         
         return {
             "text": commentary_text,
@@ -34,6 +40,14 @@ async def analyze(request: ImageRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/analyze-stream")
+async def analyze_stream(request: ImageRequest):
+    print(f"📥 Received stream request.", flush=True)
+    return StreamingResponse(
+        analyze_image_stream(request.image, CHESS_COMMENTATOR_PROMPT),
+        media_type="text/plain"
+    )
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -1,0 +1,9 @@
+# Backend
+backend/.env
+backend/__pycache__/
+backend/.venv/
+backend/test-img.png
+backend/*.pyc
+
+# System
+.DS_Store
