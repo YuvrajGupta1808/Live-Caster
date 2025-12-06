@@ -1,0 +1,86 @@
+import { useState, useRef, useEffect, useCallback } from 'react';
+
+export const useScreenCapture = (onFrameCaptured) => {
+    const [stream, setStream] = useState(null);
+    const [isSharing, setIsSharing] = useState(false);
+    const videoRef = useRef(null);
+    const canvasRef = useRef(null);
+    const intervalRef = useRef(null);
+
+    const startCapture = async () => {
+        try {
+            const mediaStream = await navigator.mediaDevices.getDisplayMedia({
+                video: { cursor: "always" },
+                audio: false
+            });
+
+            setStream(mediaStream);
+            setIsSharing(true);
+
+            if (videoRef.current) {
+                videoRef.current.srcObject = mediaStream;
+                videoRef.current.play();
+            }
+
+            // Stop sharing when user clicks "Stop sharing" in browser UI
+            mediaStream.getTracks()[0].onended = () => {
+                stopCapture();
+            };
+
+        } catch (err) {
+            console.error("Error starting screen capture:", err);
+        }
+    };
+
+    const stopCapture = useCallback(() => {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            setStream(null);
+            setIsSharing(false);
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+        }
+    }, [stream]);
+
+    // Frame extraction loop
+    useEffect(() => {
+        if (isSharing && videoRef.current && canvasRef.current) {
+            intervalRef.current = setInterval(() => {
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                    // Convert to base64
+                    const frame = canvas.toDataURL('image/jpeg', 0.7); // 0.7 quality
+
+                    if (onFrameCaptured) {
+                        onFrameCaptured(frame);
+                    }
+                }
+            }, 3000); // Capture every 3 seconds
+        }
+
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+            }
+        };
+    }, [isSharing, onFrameCaptured]);
+
+    return {
+        stream,
+        isSharing,
+        startCapture,
+        stopCapture,
+        videoRef,
+        canvasRef
+    };
+};
