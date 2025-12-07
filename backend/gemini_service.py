@@ -19,7 +19,7 @@ else:
 if not elevenlabs_api_key:
     print("Warning: ELEVENLABS_API_KEY not found")
 
-model = genai.GenerativeModel('gemini-flash-latest')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # ElevenLabs config
 ELEVENLABS_VOICE_ID = "onwK4e9ZLuTAKqWW03F9"  # Daniel - British News Anchor
@@ -90,19 +90,17 @@ def refine_commentary_with_style(commentary: str) -> str:
     try:
         from prompts import DIRECTORIAL_STYLE_PROMPT
         
-        # Use Gemini Flash 2.0 for refinement
-        refinement_model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        
+        # Use same model as vision (better rate limits)
         full_prompt = f"{DIRECTORIAL_STYLE_PROMPT}\n\n{commentary}"
-        response = refinement_model.generate_content(full_prompt)
+        response = model.generate_content(full_prompt)
         
         refined_text = response.text.strip()
         print(f"✨ Refined commentary: {refined_text}")
         return refined_text
     except Exception as e:
         print(f"Error refining commentary: {e}")
-        # Fallback to original commentary with basic formatting
-        return f"{{shout}}({commentary})"
+        # Fallback: return original commentary (still usable for TTS)
+        return commentary
 
 
 def generate_audio_from_text(text: str) -> bytes:

@@ -71,7 +71,7 @@ export const useScreenCapture = (onFrameCaptured) => {
                         onFrameCaptured(frame);
                     }
                 }
-            }, 3000); // Capture every 3 seconds
+            }, 5000); // Capture every 5 seconds
         }
 
         return () => {

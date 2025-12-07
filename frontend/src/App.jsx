@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useScreenCapture } from './useScreenCapture';
 import { analyzeFrame, streamAnalyzeFrame } from './api';
 
@@ -8,6 +8,17 @@ function App() {
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
   const [isStreamingMode, setIsStreamingMode] = useState(false);
   const audioRef = useRef(null);
+
+  // Clear all state for new game
+  const clearAll = useCallback(() => {
+    setCommentary([]);
+    setIsProcessing(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
+    console.log('🧹 Cleared all commentary');
+  }, []);
 
   const handleFrameCaptured = async (frame) => {
     if (isProcessing) return; // Skip if still processing previous frame
@@ -57,6 +68,12 @@ function App() {
     canvasRef
   } = useScreenCapture(handleFrameCaptured);
 
+  // Handle stop - clear everything and stop capture
+  const handleStop = () => {
+    clearAll();
+    stopCapture();
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <header className="mb-8 text-center">
@@ -94,12 +111,19 @@ function App() {
           </div>
 
           {isSharing && (
-            <div className="flex justify-center gap-4">
+            <div className="flex justify-center gap-4 flex-wrap">
               <button
-                onClick={stopCapture}
+                onClick={handleStop}
                 className="px-6 py-2 bg-red-600 hover:bg-red-500 rounded-lg font-semibold transition-colors"
               >
                 Stop Commentary
+              </button>
+
+              <button
+                onClick={clearAll}
+                className="px-6 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg font-semibold transition-colors"
+              >
+                🔄 New Game
               </button>
 
               <button
