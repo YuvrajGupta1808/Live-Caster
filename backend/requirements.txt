@@ -1,6 +1,9 @@
 fastapi
 uvicorn
 google-generativeai
+google-genai
 python-dotenv
 python-multipart
 gTTS
+elevenlabs
+pydantic

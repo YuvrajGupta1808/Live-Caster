@@ -38,9 +38,9 @@ function App() {
         // Add new commentary to the list
         setCommentary(prev => [...prev, { text: result.text, timestamp: new Date() }]);
 
-        // Play audio if available
+        // Play audio if available (MP3 from ElevenLabs)
         if (result.audio && audioRef.current) {
-          audioRef.current.src = `data:audio/mp3;base64,${result.audio}`;
+          audioRef.current.src = `data:audio/mpeg;base64,${result.audio}`;
           audioRef.current.play();
         }
       }
