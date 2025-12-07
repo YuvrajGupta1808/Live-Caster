@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { streamAnalyzeFrame } from './api';
+import { streamAnalyzeFrameWithAudio } from './api';
 import { useScreenCapture } from './useScreenCapture';
 
 function App() {
@@ -72,19 +72,52 @@ function App() {
     const newComment = { text: '', timestamp: new Date(), isStreaming: true };
     setCommentary(prev => [...prev, newComment]);
 
-    await streamAnalyzeFrame(frame, (chunk) => {
-      setCommentary(prev => {
-        const updated = [...prev];
-        const lastIdx = updated.length - 1;
-        if (lastIdx >= 0) {
-          updated[lastIdx] = {
-            ...updated[lastIdx],
-            text: updated[lastIdx].text + chunk
-          };
+    console.log('🎬 Starting frame analysis, audio enabled:', isAudioEnabled);
+
+    await streamAnalyzeFrameWithAudio(
+      frame,
+      // onText callback - streams text in real-time
+      (textChunk) => {
+        setCommentary(prev => {
+          const updated = [...prev];
+          const lastIdx = updated.length - 1;
+          if (lastIdx >= 0) {
+            updated[lastIdx] = {
+              ...updated[lastIdx],
+              text: updated[lastIdx].text + textChunk
+            };
+          }
+          return updated;
+        });
+      },
+      // onAudio callback - plays audio when ready
+      (audioData) => {
+        console.log('🎵 Audio data received, length:', audioData?.length, 'Audio enabled:', isAudioEnabled);
+        
+        if (audioRef.current) {
+          try {
+            // Create audio blob and play
+            const audioSrc = `data:audio/wav;base64,${audioData}`;
+            audioRef.current.src = audioSrc;
+            
+            console.log('🔊 Attempting to play audio...');
+            
+            // Always try to play (user can control with Voice button)
+            audioRef.current.play()
+              .then(() => {
+                console.log('✅ Audio playing successfully');
+              })
+              .catch(err => {
+                console.error('❌ Error playing audio:', err);
+              });
+          } catch (error) {
+            console.error('❌ Error setting audio:', error);
+          }
+        } else {
+          console.error('❌ Audio ref is null');
         }
-        return updated;
-      });
-    });
+      }
+    );
 
     setCommentary(prev => {
       const updated = [...prev];
@@ -292,7 +325,7 @@ function App() {
         </div>
       </div>
 
-      <audio ref={audioRef} className="hidden" />
+      <audio ref={audioRef} className="hidden" preload="auto" />
     </div>
   );
 }
