@@ -10,17 +10,15 @@ export const useScreenCapture = (onFrameCaptured) => {
     const startCapture = async () => {
         try {
             const mediaStream = await navigator.mediaDevices.getDisplayMedia({
-                video: { cursor: "always" },
+                video: {
+                    cursor: "always",
+                    displaySurface: "browser"
+                },
                 audio: false
             });
 
             setStream(mediaStream);
             setIsSharing(true);
-
-            if (videoRef.current) {
-                videoRef.current.srcObject = mediaStream;
-                videoRef.current.play();
-            }
 
             // Stop sharing when user clicks "Stop sharing" in browser UI
             mediaStream.getTracks()[0].onended = () => {
@@ -31,6 +29,14 @@ export const useScreenCapture = (onFrameCaptured) => {
             console.error("Error starting screen capture:", err);
         }
     };
+
+    // Attach stream to video element when it becomes available
+    useEffect(() => {
+        if (stream && videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(err => console.error("Error playing video:", err));
+        }
+    }, [stream, isSharing]); // Re-run when sharing state changes and video element is mounted
 
     const stopCapture = useCallback(() => {
         if (stream) {
@@ -65,7 +71,7 @@ export const useScreenCapture = (onFrameCaptured) => {
                         onFrameCaptured(frame);
                     }
                 }
-            }, 3000); // Capture every 3 seconds
+            }, 5000); // Capture every 5 seconds
         }
 
         return () => {

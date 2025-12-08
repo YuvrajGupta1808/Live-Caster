@@ -1,29 +1,63 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useScreenCapture } from './useScreenCapture';
-import { analyzeFrame } from './api';
+import { analyzeFrame, streamAnalyzeFrame } from './api';
 
 function App() {
   const [commentary, setCommentary] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(false);
+  const [isStreamingMode, setIsStreamingMode] = useState(false);
   const audioRef = useRef(null);
+
+  // Clear all state for new game
+  const clearAll = useCallback(() => {
+    setCommentary([]);
+    setIsProcessing(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
+    console.log('🧹 Cleared all commentary');
+  }, []);
 
   const handleFrameCaptured = async (frame) => {
     if (isProcessing) return; // Skip if still processing previous frame
 
     setIsProcessing(true);
-    const result = await analyzeFrame(frame);
-    setIsProcessing(false);
 
-    if (result) {
-      // Add new commentary to the list
-      setCommentary(prev => [...prev, { text: result.text, timestamp: new Date() }]);
+    if (isStreamingMode) {
+      // Initialize new commentary item
+      setCommentary(prev => [...prev, { text: '', timestamp: new Date() }]);
 
-      // Play audio if available
-      if (result.audio && audioRef.current) {
-        audioRef.current.src = `data:audio/mp3;base64,${result.audio}`;
-        audioRef.current.play();
+      await streamAnalyzeFrame(frame, (chunk) => {
+        setCommentary(prev => {
+          const newPrev = [...prev];
+          const lastIdx = newPrev.length - 1;
+          if (lastIdx >= 0) {
+            newPrev[lastIdx] = {
+              ...newPrev[lastIdx],
+              text: newPrev[lastIdx].text + chunk
+            };
+          }
+          return newPrev;
+        });
+      });
+    } else {
+      const result = await analyzeFrame(frame, !isAudioEnabled);
+
+      if (result) {
+        // Add new commentary to the list
+        setCommentary(prev => [...prev, { text: result.text, timestamp: new Date() }]);
+
+        // Play audio if available (MP3 from ElevenLabs)
+        if (result.audio && audioRef.current) {
+          audioRef.current.src = `data:audio/mpeg;base64,${result.audio}`;
+          audioRef.current.play();
+        }
       }
     }
+
+    setIsProcessing(false);
   };
 
   const {
@@ -33,6 +67,12 @@ function App() {
     videoRef,
     canvasRef
   } = useScreenCapture(handleFrameCaptured);
+
+  // Handle stop - clear everything and stop capture
+  const handleStop = () => {
+    clearAll();
+    stopCapture();
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
@@ -71,12 +111,39 @@ function App() {
           </div>
 
           {isSharing && (
-            <div className="flex justify-center">
+            <div className="flex justify-center gap-4 flex-wrap">
               <button
-                onClick={stopCapture}
+                onClick={handleStop}
                 className="px-6 py-2 bg-red-600 hover:bg-red-500 rounded-lg font-semibold transition-colors"
               >
                 Stop Commentary
+              </button>
+
+              <button
+                onClick={clearAll}
+                className="px-6 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg font-semibold transition-colors"
+              >
+                🔄 New Game
+              </button>
+
+              <button
+                onClick={() => setIsStreamingMode(!isStreamingMode)}
+                className={`px-6 py-2 rounded-lg font-semibold transition-colors ${isStreamingMode
+                  ? 'bg-purple-600 hover:bg-purple-500'
+                  : 'bg-gray-600 hover:bg-gray-500'
+                  }`}
+              >
+                {isStreamingMode ? '🌊 Stream ON' : '🌊 Stream OFF'}
+              </button>
+
+              <button
+                onClick={() => setIsAudioEnabled(!isAudioEnabled)}
+                className={`px-6 py-2 rounded-lg font-semibold transition-colors ${isAudioEnabled
+                  ? 'bg-green-600 hover:bg-green-500'
+                  : 'bg-gray-600 hover:bg-gray-500'
+                  }`}
+              >
+                {isAudioEnabled ? '🔊 Voice ON' : '🔇 Voice OFF'}
               </button>
             </div>
           )}
