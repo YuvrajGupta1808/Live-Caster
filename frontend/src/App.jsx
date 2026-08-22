@@ -29,14 +29,27 @@ function App() {
       // Initialize new commentary item
       setCommentary(prev => [...prev, { text: '', timestamp: new Date() }]);
 
-      await streamAnalyzeFrame(frame, (chunk) => {
+      await streamAnalyzeFrame(frame, (event) => {
+        if (event.type === 'error') {
+          console.error('Stream error:', event.content);
+          return;
+        }
+        if (event.type === 'audio' && audioRef.current) {
+          audioRef.current.src = `data:audio/mpeg;base64,${event.content}`;
+          audioRef.current.play();
+          return;
+        }
+        if (event.type !== 'text' && event.type !== 'refined') return;
         setCommentary(prev => {
           const newPrev = [...prev];
           const lastIdx = newPrev.length - 1;
           if (lastIdx >= 0) {
             newPrev[lastIdx] = {
               ...newPrev[lastIdx],
-              text: newPrev[lastIdx].text + chunk
+              // The refined line replaces the raw draft; text chunks append.
+              text: event.type === 'refined'
+                ? event.content
+                : newPrev[lastIdx].text + event.content
             };
           }
           return newPrev;

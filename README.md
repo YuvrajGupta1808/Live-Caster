@@ -14,6 +14,16 @@ This project won 3rd prize at the Google DeepMind x Cerebral Valley Gemini Hacka
 
 The current frontend copy is chess-focused, but the prompt pipeline is already written to support multiple games.
 
+## Configuration
+
+| Env var | Purpose |
+|---|---|
+| `GEMINI_API_KEY` | Gemini vision + refinement (required) |
+| `ELEVENLABS_API_KEY` | TTS narration (optional) |
+| `LIVECASTER_ALLOWED_ORIGINS` | Comma-separated CORS origins (defaults to localhost dev ports) |
+
+Run backend tests with `python -m pytest backend/tests -q`.
+
 ## Demo Flow
 
 1. Start screen sharing from the frontend
