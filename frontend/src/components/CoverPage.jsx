@@ -1,6 +1,6 @@
 // Minimal cover page: wordmark, one line, start.
 
-export default function CoverPage({ onStart, onHistory, hasHistory, theme, onToggleTheme, quiet, onToggleQuiet, notice }) {
+export default function CoverPage({ onStart, onHistory, hasHistory, theme, onToggleTheme, quiet, onToggleQuiet }) {
   return (
     <div className="h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-100 flex flex-col transition-colors">
       <header className="flex items-center justify-between px-8 py-6">
@@ -59,11 +59,6 @@ export default function CoverPage({ onStart, onHistory, hasHistory, theme, onTog
           Quiet mode — speak only when something needs my attention
         </label>
 
-        {notice && (
-          <p role="status" className="mt-6 text-sm text-yellow-600 dark:text-yellow-400">
-            {notice}
-          </p>
-        )}
       </main>
 
       <footer className="px-8 py-6 text-center">

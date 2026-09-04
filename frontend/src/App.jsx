@@ -39,6 +39,7 @@ function App() {
   const [userSpeaking, setUserSpeaking] = useState(false);
   const [quietMode, setQuietMode] = useState(false);
   const [slowVoice, setSlowVoice] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
 
   const [sessions, setSessions] = useState([]);
@@ -255,6 +256,8 @@ function App() {
     await startCapture();
   }, [clearAll, handleLiveEvent, quietMode, startCapture]);
 
+  // Ending a session keeps you in the workspace with the transcript on
+  // screen; a fresh session starts from the sidebar or the cover.
   const handleStop = useCallback((reason = '') => {
     sessionRef.current?.stop();
     sessionRef.current = null;
@@ -266,7 +269,6 @@ function App() {
     setStatus('idle');
     setIsMuted(false);
     refreshSessions();
-    setView('cover');
     if (reason) setNotice(reason);
   }, [refreshSessions, stopCapture]);
 
@@ -345,11 +347,13 @@ function App() {
         if (statusRef.current === 'live') describeNow();
       } else if (e.key === 'r' || e.key === 'R') {
         if (statusRef.current === 'live') repeatLast();
+      } else if (e.key === 's' || e.key === 'S') {
+        if (statusRef.current === 'live') toggleSlowVoice();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleStart, handleStop, toggleMute, describeNow, repeatLast]);
+  }, [handleStart, handleStop, toggleMute, describeNow, repeatLast, toggleSlowVoice]);
 
   const handleSelectSession = async (id) => {
     if (status === 'live' || status === 'connecting') return; // don't leave a live session
@@ -387,7 +391,6 @@ function App() {
         onToggleTheme={toggleTheme}
         quiet={quietMode}
         onToggleQuiet={() => setQuietMode((q) => !q)}
-        notice={notice}
       />
     );
   }
@@ -418,6 +421,41 @@ function App() {
               <span className="text-sm font-mono text-zinc-400 dark:text-zinc-600" aria-label="Session length">
                 {mm}:{ss}
               </span>
+            )}
+            {status === 'live' && (
+              <div className="relative">
+                <button
+                  onClick={() => setMenuOpen((o) => !o)}
+                  aria-label="Session actions"
+                  aria-expanded={menuOpen}
+                  aria-haspopup="menu"
+                  className="w-8 h-8 rounded-full border border-zinc-300 dark:border-zinc-700 flex items-center justify-center text-sm hover:border-yellow-500 dark:hover:border-yellow-400 transition-colors"
+                >
+                  ☰
+                </button>
+                {menuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 mt-2 w-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-xl z-20 py-1.5"
+                  >
+                    {[
+                      { label: 'Describe now', key: 'D', onClick: describeNow },
+                      { label: 'Repeat last line', key: 'R', onClick: repeatLast },
+                      { label: slowVoice ? 'Slow speech ✓' : 'Slow speech', key: 'S', onClick: toggleSlowVoice },
+                    ].map((item) => (
+                      <button
+                        key={item.label}
+                        role="menuitem"
+                        onClick={() => { item.onClick(); setMenuOpen(false); }}
+                        className="w-full flex items-center justify-between px-4 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors"
+                      >
+                        {item.label}
+                        <kbd className="text-xs text-zinc-400 dark:text-zinc-600">{item.key}</kbd>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
             <button
               onClick={toggleTheme}
@@ -460,10 +498,7 @@ function App() {
           userSpeaking={userSpeaking}
           status={status}
           errorMessage={errorMessage}
-          onDescribeNow={describeNow}
-          onRepeat={repeatLast}
-          slowVoice={slowVoice}
-          onToggleSlowVoice={toggleSlowVoice}
+          notice={notice}
         />
 
         <ChatPanel
