@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import sessions
 from live_service import run_live_bridge
-from prompts import NARRATOR_PROMPT
+from prompts import NARRATOR_PROMPT, QUIET_MODE_SUFFIX
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("livecaster")
@@ -72,7 +72,11 @@ async def ws_live(websocket: WebSocket):
     def recorder(kind: str, text: str) -> None:
         sessions.append_entry(session_id, kind, text)
 
-    await run_live_bridge(websocket, NARRATOR_PROMPT, recorder)
+    system_prompt = NARRATOR_PROMPT
+    if start.get("quiet"):
+        system_prompt += QUIET_MODE_SUFFIX
+
+    await run_live_bridge(websocket, system_prompt, recorder)
 
 
 if __name__ == "__main__":

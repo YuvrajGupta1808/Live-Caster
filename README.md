@@ -55,7 +55,22 @@ browser ◀──(native audio 24kHz PCM + both-side transcription, WS)───
 - **Session history**: every session's transcript (narration, your questions,
   tool calls) is stored and browsable in the sidebar
 - **Frame change detection**: unchanged frames are skipped client-side —
-  no cost, no narrating a static screen
+  no cost, no narrating a static screen; sent frames are downscaled to
+  ~1024px to cut token spend
+- **Sentence-complete narration**: new frames wait for the current line to
+  finish (only your voice interrupts); the freshest frame is spoken next
+- **Fully keyboard-operable**: `Space` start/stop, `M` mute, `D` describe
+  the screen right now, `R` repeat the last line — plus a slow-speech
+  toggle and a light/dark theme switch
+- **Quiet mode**: opt-in on the cover page — the narrator stays silent
+  except for things that need your attention (errors, alerts, finished
+  tasks)
+- **Self-healing sessions**: dropped Gemini connections resume with full
+  context via Live API session resumption; idle sessions auto-end after
+  5 minutes so a forgotten tab never burns credits
+- **Demo mode**: open `/?demo=1` to run the full pipeline against a
+  synthetic animated screen — no screen share needed (handy for recording
+  demos)
 
 ## Measured Latency
 

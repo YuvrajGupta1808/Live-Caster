@@ -13,20 +13,36 @@ import ChatPanel from './components/ChatPanel';
 const SPEECH_LEVEL = 0.02;
 const SPEECH_HOLD_MS = 3000;
 
+// A session with no screen changes and no speech for this long ends
+// itself — Live sessions bill continuously, and a forgotten tab shouldn't.
+const IDLE_LIMIT_MS = 5 * 60 * 1000;
+
+function loadTheme() {
+  try {
+    return localStorage.getItem('lc-theme') || 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
 function App() {
   const [view, setView] = useState('cover'); // cover | workspace
+  const [theme, setTheme] = useState(loadTheme);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [status, setStatus] = useState('idle'); // idle | connecting | live | error
   const [errorMessage, setErrorMessage] = useState('');
-  const [feed, setFeed] = useState([]); // {kind: 'model'|'user'|'tool', text, timestamp, final}
+  const [notice, setNotice] = useState('');
+  const [feed, setFeed] = useState([]); // {kind: 'model'|'user'|'tool'|'frame', ...}
   const [timeToFirstWord, setTimeToFirstWord] = useState(null);
   const [skippedFrames, setSkippedFrames] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [userSpeaking, setUserSpeaking] = useState(false);
-  const [lastFrame, setLastFrame] = useState(null);
-  const [lastFrameAt, setLastFrameAt] = useState(null);
+  const [quietMode, setQuietMode] = useState(false);
+  const [slowVoice, setSlowVoice] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
 
   const [sessions, setSessions] = useState([]);
-  const [viewingSession, setViewingSession] = useState(null); // {id, mode, feed}
+  const [viewingSession, setViewingSession] = useState(null); // {id, feed}
 
   const sessionRef = useRef(null);
   const playerRef = useRef(null);
@@ -34,6 +50,23 @@ function App() {
   const frameSentAtRef = useRef(null);
   const awaitingAudioRef = useRef(false);
   const lastSpeechAtRef = useRef(0);
+  const currentTurnAudioRef = useRef([]);
+  const lastTurnAudioRef = useRef([]);
+  const lastActivityRef = useRef(0);
+  const startedAtRef = useRef(null);
+  const statusRef = useRef('idle');
+  statusRef.current = status;
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    try {
+      localStorage.setItem('lc-theme', theme);
+    } catch {
+      // storage unavailable; theme just won't persist
+    }
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
   const refreshSessions = useCallback(async () => {
     setSessions(await fetchSessions());
@@ -46,8 +79,9 @@ function App() {
     setTimeToFirstWord(null);
     setSkippedFrames(0);
     setUserSpeaking(false);
-    setLastFrame(null);
-    setLastFrameAt(null);
+    setElapsed(0);
+    currentTurnAudioRef.current = [];
+    lastTurnAudioRef.current = [];
   }, []);
 
   const appendToFeed = useCallback((kind, content) => {
@@ -73,6 +107,21 @@ function App() {
     });
   }, []);
 
+  // Consecutive outgoing frames collapse into one stream line that keeps
+  // the latest thumbnail and a running count, so the log stays readable.
+  const appendFrameToFeed = useCallback((img) => {
+    setFeed((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && last.kind === 'frame') {
+        next[next.length - 1] = { ...last, img, count: last.count + 1, timestamp: new Date() };
+      } else {
+        next.push({ kind: 'frame', img, count: 1, timestamp: new Date(), final: true });
+      }
+      return next;
+    });
+  }, []);
+
   const handleLiveEvent = useCallback((event) => {
     switch (event.type) {
       case 'session':
@@ -80,6 +129,8 @@ function App() {
 
       case 'ready':
         setStatus('live');
+        startedAtRef.current = performance.now();
+        lastActivityRef.current = performance.now();
         break;
 
       case 'audio':
@@ -87,6 +138,8 @@ function App() {
           setTimeToFirstWord((performance.now() - frameSentAtRef.current) / 1000);
           awaitingAudioRef.current = false;
         }
+        currentTurnAudioRef.current.push(event.data);
+        lastActivityRef.current = performance.now();
         playerRef.current?.play(event.data);
         break;
 
@@ -96,6 +149,7 @@ function App() {
 
       case 'user_text':
         appendToFeed('user', event.content);
+        lastActivityRef.current = performance.now();
         break;
 
       case 'tool_call':
@@ -104,10 +158,18 @@ function App() {
 
       case 'interrupted':
         playerRef.current?.flush();
+        if (currentTurnAudioRef.current.length) {
+          lastTurnAudioRef.current = currentTurnAudioRef.current;
+          currentTurnAudioRef.current = [];
+        }
         finalizeFeed();
         break;
 
       case 'turn_complete':
+        if (currentTurnAudioRef.current.length) {
+          lastTurnAudioRef.current = currentTurnAudioRef.current;
+          currentTurnAudioRef.current = [];
+        }
         finalizeFeed();
         break;
 
@@ -117,6 +179,7 @@ function App() {
         break;
 
       case 'closed':
+        finalizeFeed(); // no stray streaming cursor after the session ends
         setStatus((s) => (s === 'error' ? s : 'idle'));
         break;
 
@@ -130,14 +193,14 @@ function App() {
     if (!session || !session.isOpen) return;
     const userTalking = performance.now() - lastSpeechAtRef.current < SPEECH_HOLD_MS;
     if (session.sendFrame(frame, !userTalking)) {
-      setLastFrame(frame);
-      setLastFrameAt(new Date());
+      appendFrameToFeed(frame);
+      lastActivityRef.current = performance.now();
       if (!userTalking) {
         frameSentAtRef.current = performance.now();
         awaitingAudioRef.current = true;
       }
     }
-  }, []);
+  }, [appendFrameToFeed]);
 
   const handleFrameSkipped = useCallback(() => {
     setSkippedFrames((n) => n + 1);
@@ -147,14 +210,17 @@ function App() {
     isSharing,
     startCapture,
     stopCapture,
+    captureNow,
     videoRef,
     canvasRef
   } = useScreenCapture(handleFrameCaptured, handleFrameSkipped);
 
-  const handleStart = async () => {
+  const handleStart = useCallback(async () => {
     clearAll();
     setViewingSession(null);
     setErrorMessage('');
+    setNotice('');
+    setSlowVoice(false);
     setStatus('connecting');
     setView('workspace');
 
@@ -162,7 +228,7 @@ function App() {
     playerRef.current = new PcmPlayer();
     playerRef.current.ensureContext();
 
-    const session = new LiveSession({ onEvent: handleLiveEvent });
+    const session = new LiveSession({ onEvent: handleLiveEvent, quiet: quietMode });
     sessionRef.current = session;
     session.connect();
 
@@ -171,6 +237,7 @@ function App() {
       onLevel: (level) => {
         if (level > SPEECH_LEVEL) {
           lastSpeechAtRef.current = performance.now();
+          lastActivityRef.current = performance.now();
           setUserSpeaking(true);
         } else if (performance.now() - lastSpeechAtRef.current > 600) {
           setUserSpeaking(false);
@@ -186,9 +253,9 @@ function App() {
     }
 
     await startCapture();
-  };
+  }, [clearAll, handleLiveEvent, quietMode, startCapture]);
 
-  const handleStop = () => {
+  const handleStop = useCallback((reason = '') => {
     sessionRef.current?.stop();
     sessionRef.current = null;
     playerRef.current?.close();
@@ -200,13 +267,89 @@ function App() {
     setIsMuted(false);
     refreshSessions();
     setView('cover');
-  };
+    if (reason) setNotice(reason);
+  }, [refreshSessions, stopCapture]);
 
-  const toggleMute = () => {
-    const next = !isMuted;
-    setIsMuted(next);
-    micRef.current?.setMuted(next);
-  };
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      micRef.current?.setMuted(!prev);
+      return !prev;
+    });
+  }, []);
+
+  // "Describe now": capture this instant, skip the diff, force a line.
+  const describeNow = useCallback(() => {
+    const frame = captureNow();
+    const session = sessionRef.current;
+    if (!frame || !session || !session.isOpen) return;
+    if (session.sendFrame(frame, true)) {
+      appendFrameToFeed(frame);
+      frameSentAtRef.current = performance.now();
+      awaitingAudioRef.current = true;
+      lastActivityRef.current = performance.now();
+    }
+  }, [captureNow, appendFrameToFeed]);
+
+  // "Read that again": replay the audio of the last completed line.
+  const repeatLast = useCallback(() => {
+    const chunks = lastTurnAudioRef.current;
+    if (!chunks.length || !playerRef.current) return;
+    playerRef.current.flush();
+    chunks.forEach((c) => playerRef.current.play(c));
+  }, []);
+
+  const toggleSlowVoice = useCallback(() => {
+    setSlowVoice((prev) => {
+      const next = !prev;
+      sessionRef.current?.sendInstruction(
+        next
+          ? 'From now on, speak more slowly and enunciate clearly.'
+          : 'Return to your normal speaking pace now.'
+      );
+      return next;
+    });
+  }, []);
+
+  // Session clock + idle auto-stop.
+  useEffect(() => {
+    if (status !== 'live') return undefined;
+    const tick = setInterval(() => {
+      if (startedAtRef.current) {
+        setElapsed(Math.floor((performance.now() - startedAtRef.current) / 1000));
+      }
+      if (performance.now() - lastActivityRef.current > IDLE_LIMIT_MS) {
+        handleStop('Session ended automatically after 5 minutes of inactivity.');
+      }
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [status, handleStop]);
+
+  // Keyboard shortcuts — the app must be fully operable without sight or
+  // precise pointing: Space start/stop, M mute, D describe now, R repeat.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (statusRef.current === 'live' || statusRef.current === 'connecting') {
+          handleStop();
+        } else {
+          handleStart();
+        }
+      } else if (e.key === 'm' || e.key === 'M') {
+        if (statusRef.current === 'live') toggleMute();
+      } else if (e.key === 'd' || e.key === 'D') {
+        if (statusRef.current === 'live') describeNow();
+      } else if (e.key === 'r' || e.key === 'R') {
+        if (statusRef.current === 'live') repeatLast();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleStart, handleStop, toggleMute, describeNow, repeatLast]);
 
   const handleSelectSession = async (id) => {
     if (status === 'live' || status === 'connecting') return; // don't leave a live session
@@ -240,35 +383,58 @@ function App() {
         onStart={handleStart}
         onHistory={() => setView('workspace')}
         hasHistory={sessions.length > 0}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        quiet={quietMode}
+        onToggleQuiet={() => setQuietMode((q) => !q)}
+        notice={notice}
       />
     );
   }
 
   const statusBadge = {
-    idle: { text: 'OFFLINE', className: 'text-zinc-600 border-zinc-800' },
-    connecting: { text: 'CONNECTING', className: 'text-yellow-400 border-yellow-400/50 animate-pulse' },
-    live: { text: '● LIVE', className: 'text-yellow-400 border-yellow-400' },
-    error: { text: 'ERROR', className: 'text-yellow-300 border-yellow-400/50' },
+    idle: { text: 'OFFLINE', className: 'text-zinc-400 border-zinc-300 dark:text-zinc-600 dark:border-zinc-800' },
+    connecting: { text: 'CONNECTING', className: 'text-yellow-600 border-yellow-500/50 dark:text-yellow-400 dark:border-yellow-400/50 animate-pulse' },
+    live: { text: '● LIVE', className: 'text-yellow-600 border-yellow-500 dark:text-yellow-400 dark:border-yellow-400' },
+    error: { text: 'ERROR', className: 'text-yellow-700 border-yellow-500/50 dark:text-yellow-300 dark:border-yellow-400/50' },
   }[status];
 
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+
   return (
-    <div className="h-screen bg-black text-zinc-100 flex flex-col">
-      <header className="border-b border-zinc-900 shrink-0">
+    <div className="h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-100 flex flex-col transition-colors">
+      <header className="border-b border-zinc-200 dark:border-zinc-900 shrink-0">
         <div className="px-5 py-3 flex items-center justify-between gap-3">
           <button
             onClick={handleNewSession}
             className="font-bold tracking-[0.25em] text-sm hover:opacity-80 transition-opacity"
             aria-label="Back to start"
           >
-            <span className="text-yellow-400">LIVE</span> CASTER
+            <span className="text-yellow-600 dark:text-yellow-400">LIVE</span> CASTER
           </button>
-          <span
-            role="status"
-            aria-live="polite"
-            className={`px-3 py-1 rounded-full text-xs font-bold border tracking-widest ${statusBadge.className}`}
-          >
-            {statusBadge.text}
-          </span>
+          <div className="flex items-center gap-3">
+            {status === 'live' && (
+              <span className="text-sm font-mono text-zinc-400 dark:text-zinc-600" aria-label="Session length">
+                {mm}:{ss}
+              </span>
+            )}
+            <button
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              className="w-8 h-8 rounded-full border border-zinc-300 dark:border-zinc-700 flex items-center justify-center text-sm hover:border-yellow-500 dark:hover:border-yellow-400 transition-colors"
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+            <span
+              role="status"
+              aria-live="polite"
+              className={`px-3 py-1 rounded-full text-xs font-bold border tracking-widest ${statusBadge.className}`}
+            >
+              {statusBadge.text}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -279,6 +445,8 @@ function App() {
           onSelect={handleSelectSession}
           onNew={handleNewSession}
           isLive={status === 'live' || status === 'connecting'}
+          open={sidebarOpen}
+          onToggle={() => setSidebarOpen((o) => !o)}
         />
 
         <ScreenPanel
@@ -286,23 +454,24 @@ function App() {
           isViewingHistory={isViewingHistory}
           videoRef={videoRef}
           canvasRef={canvasRef}
-          onStop={handleStop}
+          onStop={() => handleStop()}
           isMuted={isMuted}
           onToggleMute={toggleMute}
           userSpeaking={userSpeaking}
-          lastFrame={lastFrame}
-          lastFrameAt={lastFrameAt}
-          timeToFirstWord={timeToFirstWord}
-          skippedFrames={skippedFrames}
           status={status}
           errorMessage={errorMessage}
+          onDescribeNow={describeNow}
+          onRepeat={repeatLast}
+          slowVoice={slowVoice}
+          onToggleSlowVoice={toggleSlowVoice}
         />
 
         <ChatPanel
           feed={isViewingHistory ? viewingSession.feed : feed}
           status={status}
           isViewingHistory={isViewingHistory}
-          historyTitle={isViewingHistory ? 'Past Session' : ''}
+          timeToFirstWord={timeToFirstWord}
+          skippedFrames={skippedFrames}
         />
       </div>
     </div>

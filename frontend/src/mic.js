@@ -1,6 +1,10 @@
-// Microphone capture for the live session: 16kHz 16-bit PCM chunks,
-// base64-encoded, delivered via onChunk. Also reports a rough speech
-// level via onLevel so the app knows when the user is talking.
+// Microphone capture for the live session: resampled to 16kHz 16-bit PCM
+// chunks, base64-encoded, delivered via onChunk. Also reports a rough
+// speech level via onLevel so the app knows when the user is talking.
+//
+// The AudioContext runs at the device's native rate and we downsample
+// ourselves — asking the browser for a 16kHz context is not honored
+// everywhere, and a mislabeled rate makes the model hear noise.
 
 const TARGET_SAMPLE_RATE = 16000;
 const CHUNK_SAMPLES = 2048; // ~128ms at 16kHz per WebSocket message
@@ -15,6 +19,23 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
 }
 registerProcessor('pcm-capture', PcmCaptureProcessor);
 `;
+
+function downsample(samples, fromRate, toRate) {
+    if (fromRate === toRate) return samples;
+    const ratio = fromRate / toRate;
+    const outLength = Math.floor(samples.length / ratio);
+    const out = new Float32Array(outLength);
+    for (let i = 0; i < outLength; i++) {
+        // Average the source window for each output sample (cheap low-pass
+        // so downsampling doesn't alias speech into hiss).
+        const start = Math.floor(i * ratio);
+        const end = Math.min(Math.floor((i + 1) * ratio), samples.length);
+        let sum = 0;
+        for (let j = start; j < end; j++) sum += samples[j];
+        out[i] = sum / Math.max(1, end - start);
+    }
+    return out;
+}
 
 export class MicStreamer {
     constructor({ onChunk, onLevel }) {
@@ -36,7 +57,7 @@ export class MicStreamer {
             },
         });
 
-        this.ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+        this.ctx = new AudioContext();
         const workletUrl = URL.createObjectURL(
             new Blob([WORKLET_SOURCE], { type: 'application/javascript' })
         );
@@ -52,9 +73,10 @@ export class MicStreamer {
     handleSamples(samples) {
         if (this.muted) return;
 
-        const merged = new Float32Array(this.pending.length + samples.length);
+        const resampled = downsample(samples, this.ctx.sampleRate, TARGET_SAMPLE_RATE);
+        const merged = new Float32Array(this.pending.length + resampled.length);
         merged.set(this.pending);
-        merged.set(samples, this.pending.length);
+        merged.set(resampled, this.pending.length);
         this.pending = merged;
 
         while (this.pending.length >= CHUNK_SAMPLES) {

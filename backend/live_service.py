@@ -46,8 +46,8 @@ DEFAULT_VERTEX_LOCATION = "us-central1"
 # Sent after each frame to trigger one line of commentary. The system
 # prompt (per mode) carries the persona and the don't-repeat rules.
 FRAME_NUDGE = (
-    "A new frame of the screen just arrived. Look at it carefully and "
-    "speak your next narration line about what is actually visible in it."
+    "Here is the current frame of the shared screen. Narrate what is "
+    "visible in this image."
 )
 
 
@@ -64,7 +64,7 @@ def get_live_model() -> str:
     return DEFAULT_LIVE_MODEL
 
 
-def build_live_config(system_prompt: str) -> types.LiveConnectConfig:
+def build_live_config(system_prompt: str, resumption_handle=None) -> types.LiveConnectConfig:
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         system_instruction=system_prompt,
@@ -73,6 +73,9 @@ def build_live_config(system_prompt: str) -> types.LiveConnectConfig:
         # Native Google Search lets the model look things up when the
         # screen alone isn't enough; searches surface as tool events.
         tools=[types.Tool(google_search=types.GoogleSearch())],
+        # Ask the server for resumption handles so a dropped Gemini
+        # connection can be re-attached with its context intact.
+        session_resumption=types.SessionResumptionConfig(handle=resumption_handle),
     )
 
 
@@ -112,7 +115,37 @@ def decode_frame(base64_image: str) -> bytes:
     return base64.b64decode(base64_image)
 
 
-async def _pump_client_messages(websocket: WebSocket, session) -> None:
+class _BridgeState:
+    """Coordination between the two pumps: a new narration turn must not
+    cut off a sentence the model is still speaking. Only the user's voice
+    (realtime channel, VAD) is allowed to interrupt."""
+
+    def __init__(self):
+        self.model_speaking = False
+        self.pending_frame = None  # latest held-back frame (jpeg bytes)
+        self.resumption_handle = None  # latest Gemini session-resumption handle
+
+
+async def _send_frame_turn(session, jpeg_bytes: bytes) -> None:
+    """One narration turn: the frame INSIDE the content turn so the model
+    is guaranteed to be looking at this exact image when it speaks — a
+    bare text nudge next to realtime media let it answer without
+    attending to the frame at all."""
+    await session.send_client_content(
+        turns=types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    inline_data=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
+                ),
+                types.Part(text=FRAME_NUDGE),
+            ],
+        ),
+        turn_complete=True,
+    )
+
+
+async def _pump_client_messages(websocket: WebSocket, session, state: _BridgeState) -> None:
     """Forward frames from the browser into the Live session until stop."""
     while True:
         message = await websocket.receive_json()
@@ -120,24 +153,36 @@ async def _pump_client_messages(websocket: WebSocket, session) -> None:
 
         if message_type == "frame":
             jpeg_bytes = decode_frame(message.get("data", ""))
-            await session.send_realtime_input(
-                media=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
-            )
-            # The nudge triggers a narration line. The client suppresses it
-            # while the user is speaking so narration never competes with
-            # a conversation turn.
             if message.get("nudge", True):
-                await session.send_client_content(
-                    turns=types.Content(
-                        role="user", parts=[types.Part(text=FRAME_NUDGE)]
-                    ),
-                    turn_complete=True,
+                if state.model_speaking:
+                    # Let the model finish its sentence; keep only the
+                    # newest frame for when the turn completes.
+                    state.pending_frame = jpeg_bytes
+                else:
+                    state.model_speaking = True
+                    await _send_frame_turn(session, jpeg_bytes)
+            else:
+                # User is talking: keep the screen in context over the
+                # realtime channel without forcing a narration response.
+                await session.send_realtime_input(
+                    media=types.Blob(data=jpeg_bytes, mime_type="image/jpeg")
                 )
         elif message_type == "audio":
             pcm_bytes = base64.b64decode(message.get("data", ""))
             await session.send_realtime_input(
                 audio=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")
             )
+        elif message_type == "instruction":
+            # A user-initiated style instruction (e.g. speak slower).
+            text = message.get("text", "").strip()
+            if text:
+                await session.send_client_content(
+                    turns=types.Content(
+                        role="user",
+                        parts=[types.Part(text=f"{text} Acknowledge in three words or fewer.")],
+                    ),
+                    turn_complete=True,
+                )
         elif message_type == "stop":
             return
         else:
@@ -146,7 +191,9 @@ async def _pump_client_messages(websocket: WebSocket, session) -> None:
             )
 
 
-async def _pump_model_events(session, websocket: WebSocket, recorder=None) -> None:
+async def _pump_model_events(
+    session, websocket: WebSocket, state: _BridgeState, recorder=None
+) -> None:
     """Relay Live session output (audio, transcription, tool activity,
     turn markers) and record finalized transcript lines."""
     model_buffer = ""
@@ -163,9 +210,21 @@ async def _pump_model_events(session, websocket: WebSocket, recorder=None) -> No
         model_buffer = ""
         user_buffer = ""
 
+    async def flush_pending_frame() -> None:
+        state.model_speaking = False
+        if state.pending_frame is not None:
+            jpeg_bytes, state.pending_frame = state.pending_frame, None
+            state.model_speaking = True
+            await _send_frame_turn(session, jpeg_bytes)
+
     while True:
         async for response in session.receive():
+            resumption = getattr(response, "session_resumption_update", None)
+            if resumption is not None and getattr(resumption, "resumable", False):
+                state.resumption_handle = resumption.new_handle
+
             if response.data:
+                state.model_speaking = True
                 await websocket.send_json(
                     {
                         "type": "audio",
@@ -207,11 +266,16 @@ async def _pump_model_events(session, websocket: WebSocket, recorder=None) -> No
 
             if getattr(server_content, "interrupted", False):
                 flush_buffers()
+                # The user barged in: whatever frame was queued is stale
+                # context now; the conversation takes over.
+                state.pending_frame = None
+                state.model_speaking = False
                 await websocket.send_json({"type": "interrupted"})
 
             if getattr(server_content, "turn_complete", False):
                 flush_buffers()
                 await websocket.send_json({"type": "turn_complete"})
+                await flush_pending_frame()
 
 
 async def run_live_bridge(websocket: WebSocket, system_prompt: str, recorder=None) -> None:
@@ -225,32 +289,61 @@ async def run_live_bridge(websocket: WebSocket, system_prompt: str, recorder=Non
         await websocket.close()
         return
 
+    state = _BridgeState()
+    max_reconnects = 5
+    reconnects = 0
+
     try:
-        async with client.aio.live.connect(
-            model=get_live_model(), config=build_live_config(system_prompt)
-        ) as session:
-            await websocket.send_json({"type": "ready", "model": get_live_model()})
+        while True:
+            async with client.aio.live.connect(
+                model=get_live_model(),
+                config=build_live_config(system_prompt, state.resumption_handle),
+            ) as session:
+                if reconnects == 0:
+                    await websocket.send_json(
+                        {"type": "ready", "model": get_live_model()}
+                    )
+                else:
+                    logger.info("Reconnected to Gemini (attempt %d)", reconnects)
 
-            client_task = asyncio.create_task(
-                _pump_client_messages(websocket, session)
-            )
-            model_task = asyncio.create_task(
-                _pump_model_events(session, websocket, recorder)
-            )
+                client_task = asyncio.create_task(
+                    _pump_client_messages(websocket, session, state)
+                )
+                model_task = asyncio.create_task(
+                    _pump_model_events(session, websocket, state, recorder)
+                )
 
-            done, pending = await asyncio.wait(
-                {client_task, model_task}, return_when=asyncio.FIRST_COMPLETED
-            )
-            for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-            for task in done:
-                exc = task.exception()
-                if exc is not None and not isinstance(exc, WebSocketDisconnect):
-                    raise exc
+                done, pending = await asyncio.wait(
+                    {client_task, model_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in pending:
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+                if client_task in done:
+                    # Browser stopped or disconnected: we're done for good.
+                    exc = client_task.exception()
+                    if exc is not None and not isinstance(exc, WebSocketDisconnect):
+                        raise exc
+                    return
+
+                # The Gemini connection ended while the browser is still
+                # here. With a resumption handle we can re-attach the same
+                # session, context intact, invisibly to the user.
+                model_exc = model_task.exception()
+                reconnects += 1
+                if state.resumption_handle is None or reconnects > max_reconnects:
+                    if model_exc is not None:
+                        raise model_exc
+                    raise RuntimeError("Gemini Live connection ended")
+                logger.warning(
+                    "Gemini connection dropped (%s); resuming session",
+                    model_exc or "server closed",
+                )
+                state.model_speaking = False
     except WebSocketDisconnect:
         logger.info("Client disconnected from live bridge")
     except Exception as exc:

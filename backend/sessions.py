@@ -57,6 +57,8 @@ def list_sessions() -> list[dict]:
         except (json.JSONDecodeError, OSError):
             continue
         entries = data.get("entries", [])
+        if not entries:
+            continue  # empty sessions are noise, not history
         first_model = next((e["text"] for e in entries if e["kind"] == "model"), "")
         summaries.append({
             "id": data["id"],

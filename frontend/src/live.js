@@ -3,8 +3,9 @@ const WS_URL = 'ws://localhost:8000/ws/live';
 // Thin wrapper around the /ws/live WebSocket. Sends {start, frame, stop}
 // messages and surfaces every server event through onEvent({type, ...}).
 export class LiveSession {
-    constructor({ onEvent }) {
+    constructor({ onEvent, quiet = false }) {
         this.onEvent = onEvent;
+        this.quiet = quiet;
         this.ws = null;
     }
 
@@ -12,7 +13,7 @@ export class LiveSession {
         this.ws = new WebSocket(WS_URL);
 
         this.ws.onopen = () => {
-            this.ws.send(JSON.stringify({ type: 'start' }));
+            this.ws.send(JSON.stringify({ type: 'start', quiet: this.quiet }));
         };
 
         this.ws.onmessage = (event) => {
@@ -45,6 +46,12 @@ export class LiveSession {
     sendAudio(base64Pcm) {
         if (!this.isOpen) return false;
         this.ws.send(JSON.stringify({ type: 'audio', data: base64Pcm }));
+        return true;
+    }
+
+    sendInstruction(text) {
+        if (!this.isOpen) return false;
+        this.ws.send(JSON.stringify({ type: 'instruction', text }));
         return true;
     }
 
