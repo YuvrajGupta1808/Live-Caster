@@ -1,9 +1,5 @@
 fastapi
-uvicorn
-google-generativeai
+uvicorn[standard]
 google-genai
 python-dotenv
-python-multipart
-gTTS
-elevenlabs
 pydantic

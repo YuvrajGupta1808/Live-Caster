@@ -1,94 +1,88 @@
 # Live Caster
 
-Live Caster is an AI-powered real-time game commentary system that watches your screen, understands the current gameplay frame, and generates short hype-caster style commentary with optional voice narration.
+[![CI](https://github.com/YuvrajGupta1808/Live-Caster/actions/workflows/ci.yml/badge.svg)](https://github.com/YuvrajGupta1808/Live-Caster/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-This project won 3rd prize at the Google DeepMind x Cerebral Valley Gemini Hackathon.
+Live Caster is a real-time screen narrator and voice assistant — an
+**accessibility tool** for blind and low-vision users. Share any window and a
+Gemini Live session watches it and **speaks**: describing what's on screen,
+reading out text that matters, and reacting to changes as they happen —
+native voice straight from the model, no separate TTS step.
 
-## What It Does
+It's a two-way conversation: **talk over it at any time** and it stops
+mid-sentence (true barge-in via Gemini's voice-activity detection), listens,
+answers your question about what it sees — where a button is, what an error
+says, a summary of the page — then resumes narrating. Everything both of you
+say appears as live captions.
 
-- Captures frames from a live shared screen in the browser
-- Sends those frames to Gemini for vision-based game understanding
-- Generates ultra-short dramatic commentary
-- Refines the line into a more theatrical shoutcaster style
-- Optionally converts the final commentary into speech using ElevenLabs
+This project won 3rd prize at the Google DeepMind x Cerebral Valley Gemini
+Hackathon.
 
-The current frontend copy is chess-focused, but the prompt pipeline is already written to support multiple games.
+<!-- TODO: 15-second demo GIF here — live narration appearing over a shared
+     screen, caption noting the audio narration. -->
 
-## Configuration
-
-| Env var | Purpose |
-|---|---|
-| `GEMINI_API_KEY` | Gemini vision + refinement (required) |
-| `ELEVENLABS_API_KEY` | TTS narration (optional) |
-| `LIVECASTER_ALLOWED_ORIGINS` | Comma-separated CORS origins (defaults to localhost dev ports) |
-
-Run backend tests with `python -m pytest backend/tests -q`.
-
-## Demo Flow
-
-1. Start screen sharing from the frontend
-2. The app captures a frame every 5 seconds
-3. The backend sends the frame to Gemini
-4. Gemini returns a short line of commentary
-5. A second prompt sharpens the line into dramatic caster-style delivery
-6. The app optionally plays back narration using ElevenLabs TTS
-
-## Tech Stack
-
-- Frontend: React + Vite + Tailwind CSS
-- Backend: FastAPI + Uvicorn
-- Vision + LLM: Gemini 2.5 Flash
-- Text to Speech: ElevenLabs
-
-## Project Structure
+## How It Works
 
 ```text
-Live-Caster/
-├── backend/
-│   ├── main.py
-│   ├── gemini_service.py
-│   ├── prompts.py
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   ├── package.json
-│   └── vite.config.js
-└── README.md
+browser ──(changed JPEG frames + mic audio 16kHz PCM, WebSocket)──▶ FastAPI bridge
+                                                                        │
+                                                              Gemini Live API session
+                                                              (bidirectional stream,
+                                                               VAD + barge-in)
+                                                                        │
+browser ◀──(native audio 24kHz PCM + both-side transcription, WS)───────┘
 ```
 
-## Requirements
+- The frontend captures a frame every 2 seconds, but **diffs consecutive
+  frames** (downscaled grayscale grid) and skips the API call entirely when
+  the screen hasn't changed — no cost, and no narrating a static board.
+- One Gemini Live session spans the whole broadcast, so the model remembers
+  everything it already said: lines continue the story instead of repeating
+  disconnected captions.
+- The model replies with **native audio** (24kHz PCM) plus a text
+  transcription; the browser plays the voice and renders the transcript
+  simultaneously.
+- The UI shows **time-to-first-word** for every line — "real-time" as a
+  measurement, not an adjective — plus a counter of skipped unchanged frames.
 
-- Python 3.10+
-- Node.js 18+
-- A Gemini API key
-- An ElevenLabs API key for voice output
+## Features
 
-## Environment Variables
+- **Live narration** of anything on screen — apps, pages, alerts, errors —
+  prioritizing meaning over pixels
+- **True barge-in**: speak and it stops mid-sentence, answers, then resumes
+- **Google Search tool**: the model can search the web when the screen alone
+  isn't enough; searches appear inline in the transcript
+- **Session history**: every session's transcript (narration, your questions,
+  tool calls) is stored and browsable in the sidebar
+- **Frame change detection**: unchanged frames are skipped client-side —
+  no cost, no narrating a static screen
 
-Create a `.env` file inside [`backend`](/Users/shreyasyadav/personal-tools/Live-Caster/backend) with:
+## Measured Latency
 
-```env
-GEMINI_API_KEY=your_gemini_api_key
-ELEVENLABS_API_KEY=your_elevenlabs_api_key
-```
+Real numbers from a live session (`gemini-live-2.5-flash-native-audio`,
+Vertex AI `us-central1`, three consecutive frames):
 
-If `ELEVENLABS_API_KEY` is omitted, the app can still run with text-only commentary.
+| Metric | Measured |
+|---|---|
+| Time to first spoken word | 0.58s – 1.09s |
+| Audio | Native 24kHz PCM, streamed while the model is still speaking |
+| Transport | One WebSocket session end to end |
 
-## Local Setup
+The UI displays time-to-first-word live for every line.
 
-### 1. Start the backend
+## Quick Start
+
+Backend:
 
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # configure auth (see below)
 python main.py
 ```
 
-The FastAPI server runs on `http://localhost:8000`.
-
-### 2. Start the frontend
+Frontend (Node 22+):
 
 ```bash
 cd frontend
@@ -96,54 +90,51 @@ npm install
 npm run dev
 ```
 
-The Vite app runs on `http://localhost:5173`.
+Open http://localhost:5173, hit **Start**, grant microphone access, and
+share the window you want narrated.
 
-## How To Use
+## Configuration
 
-1. Open the frontend in your browser
-2. Click `Start Commentary`
-3. Share the game window or browser tab
-4. Let the app analyze frames and generate live commentary
-5. Toggle voice narration on if ElevenLabs is configured
-6. Use `New Game` to clear the commentary feed
+Two auth options (set in `backend/.env`):
 
-## API Endpoints
+**Vertex AI via gcloud (preferred — no secret stored).** Run
+`gcloud auth application-default login` once, then:
 
-### `POST /analyze`
+| Env var | Purpose |
+|---|---|
+| `LIVECASTER_VERTEX_PROJECT` | GCP project to bill (required for this option) |
+| `LIVECASTER_VERTEX_LOCATION` | Vertex region (defaults to `us-central1`) |
 
-Accepts a base64 image and returns:
+**Gemini Developer API key** (from [AI Studio](https://aistudio.google.com/apikey)):
 
-- `text`: refined final commentary
-- `original_text`: raw commentary before style refinement
-- `audio`: base64-encoded MP3 when TTS is enabled
-- `timing`: pipeline timing breakdown
+| Env var | Purpose |
+|---|---|
+| `GEMINI_API_KEY` | API key (`AIza…`; for a Vertex express key also set `LIVECASTER_USE_VERTEXAI=true`) |
 
-### `POST /analyze-stream`
+Optional for both:
 
-Streams commentary chunks and then emits the refined result. This is intended for lower-latency UI updates.
+| Env var | Purpose |
+|---|---|
+| `LIVECASTER_LIVE_MODEL` | Live model override (defaults to `gemini-live-2.5-flash-native-audio` on Vertex, `gemini-2.5-flash-native-audio-preview-09-2025` on the Developer API) |
+| `LIVECASTER_ALLOWED_ORIGINS` | Comma-separated CORS origins (defaults to localhost dev ports) |
 
-## Current Behavior
+## Tech Stack
 
-- Captures one frame every 5 seconds
-- Uses a 15-word maximum commentary style
-- Supports streaming and non-streaming inference modes
-- Defaults to local development CORS settings
+- Frontend: React + Vite + Tailwind CSS, Web Audio API for PCM playback
+- Backend: FastAPI + Uvicorn, WebSocket bridge to the Gemini Live API
+- Model: Gemini 2.5 Flash native audio (Live API, bidirectional streaming)
 
-## Notes
+## Development
 
-- The UI currently labels the experience as `Chess Commentary AI`
-- The prompt layer is more general and can be extended for other esports or sports-like viewing experiences
-- The backend currently targets local development only
+Run backend tests:
 
-## Future Improvements
+```bash
+python -m pytest backend/tests -q
+```
 
-- Add automatic game detection in the UI
-- Support more commentary voices and styles
-- Improve stream parsing for cleaner incremental updates
-- Add deployment configuration and production-safe CORS
-- Store match commentary history
-- Tune frame capture intervals dynamically based on game pace
+CI runs the backend test suite and a production frontend build on every push
+and pull request.
 
-## Acknowledgment
+## License
 
-Built during the Google DeepMind x Cerebral Valley Gemini Hackathon.
+[MIT](LICENSE)

@@ -9,3 +9,4 @@ backend/*.pyc
 .DS_Store
 __pycache__/
 *.pyc
+backend/sessions/
