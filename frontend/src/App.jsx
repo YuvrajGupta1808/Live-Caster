@@ -389,6 +389,9 @@ function App() {
   };
 
   const handleNewSession = () => {
+    if (status === 'live' || status === 'connecting') {
+      handleStop();
+    }
     setViewingSession(null);
     clearAll();
     setStatus('idle');
