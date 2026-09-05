@@ -65,18 +65,39 @@ Both built via `gcloud run deploy --source .` (backend) and a
      (`live-caster-frontend-165409365963.us-central1.run.app`) in addition
      to the default `firebaseapp.com`/`web.app`/`localhost`.
 
-5. **Billing budget alert: $50/month.**
-   Email alerts at 50%/90%/100% of $50/month, scoped to this project only.
-   This does **not** stop spending or disable the app automatically — it's
-   an early-warning tripwire, chosen specifically because auth is
-   open-signup rather than allowlisted.
+5. **Billing budget: $50/month, with an automatic hard stop.**
+   Email alerts at 50%/90%/100% of $50/month (`gcloud billing budgets`),
+   plus a real enforcement mechanism since auth is open-signup rather than
+   allowlisted:
+   - The budget's `notificationsRule.pubsubTopic` publishes to the
+     `budget-kill-switch` Pub/Sub topic on every threshold crossing.
+   - A Gen2 Cloud Function (`infra/budget-kill-switch/`), triggered by
+     that topic, checks `costAmount >= budgetAmount` in the notification
+     payload. If spend has reached the $50 budget, it calls
+     `CloudBillingClient.update_project_billing_info` to unlink the
+     billing account from `live-caster-75895` entirely.
+   - This is a deliberate **hard stop, not a soft alert**: once triggered,
+     Cloud Run (both services), Firestore, and every other billed API
+     stop working immediately — a full outage — until billing is
+     **manually re-linked** in the console. Chosen over a narrower
+     "revoke Vertex AI role only" option for the strongest guarantee
+     against overspend, at the cost of an outage instead of graceful
+     degradation.
+   - Runs as a dedicated service account (`budget-kill-switch@...`) with
+     only `roles/billing.projectManager` — no broader project access.
+   - Verified: the under-budget path (`cost=$10 < budget=$50` → "no action
+     taken") was tested live via a manual Pub/Sub publish and confirmed
+     correct in Cloud Logging. The actual disable-billing path was
+     **not** live-tested (would have caused a real outage) — it relies on
+     the standard, documented `CloudBillingClient` API.
 
 ## Known gaps / things to revisit
 
-- No automatic spend cap — the budget alert only emails you. If unwanted
-  usage shows up, the fastest kill switch is disabling the Cloud Run
-  service or revoking `roles/aiplatform.user` from the backend's service
-  account.
+- The kill switch is a **monthly** budget — it resets each calendar month,
+  but disabled billing does **not** auto-re-enable. If it ever fires,
+  you must manually re-link billing in the console (Billing → link a
+  billing account) to bring the app back up, even after the month rolls
+  over.
 - `max-instances=1` means the backend can't serve more than one concurrent
   Live session well (Cloud Run will queue/reject extra traffic past that
   instance's concurrency). Fine for personal use; raise it (and confirm
