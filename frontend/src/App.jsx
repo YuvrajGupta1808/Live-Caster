@@ -3,6 +3,8 @@ import { useScreenCapture } from './useScreenCapture';
 import { LiveSession, PcmPlayer } from './live';
 import { MicStreamer } from './mic';
 import { fetchSessions, fetchSession } from './api';
+import { completeSignInFromLink, watchAuthState, signOutUser } from './firebase';
+import AuthGate from './components/AuthGate';
 import CoverPage from './components/CoverPage';
 import SessionSidebar from './components/SessionSidebar';
 import ScreenPanel from './components/ScreenPanel';
@@ -26,6 +28,8 @@ function loadTheme() {
 }
 
 function App() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [user, setUser] = useState(null);
   const [view, setView] = useState('cover'); // cover | workspace
   const [theme, setTheme] = useState(loadTheme);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -59,6 +63,17 @@ function App() {
   statusRef.current = status;
 
   useEffect(() => {
+    let unsubscribe;
+    completeSignInFromLink().finally(() => {
+      unsubscribe = watchAuthState((u) => {
+        setUser(u);
+        setAuthChecked(true);
+      });
+    });
+    return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     try {
       localStorage.setItem('lc-theme', theme);
@@ -73,7 +88,9 @@ function App() {
     setSessions(await fetchSessions());
   }, []);
 
-  useEffect(() => { refreshSessions(); }, [refreshSessions]);
+  useEffect(() => {
+    if (user) refreshSessions();
+  }, [user, refreshSessions]);
 
   const clearAll = useCallback(() => {
     setFeed([]);
@@ -381,6 +398,14 @@ function App() {
 
   const isViewingHistory = viewingSession !== null && status !== 'live' && status !== 'connecting';
 
+  if (!authChecked) {
+    return <div className="h-screen bg-zinc-50 dark:bg-black" />;
+  }
+
+  if (!user) {
+    return <AuthGate theme={theme} />;
+  }
+
   if (view === 'cover') {
     return (
       <CoverPage
@@ -391,6 +416,7 @@ function App() {
         onToggleTheme={toggleTheme}
         quiet={quietMode}
         onToggleQuiet={() => setQuietMode((q) => !q)}
+        onSignOut={signOutUser}
       />
     );
   }

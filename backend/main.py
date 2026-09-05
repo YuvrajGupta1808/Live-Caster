@@ -2,10 +2,11 @@ import logging
 import os
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 import sessions
+from auth import require_uid, require_uid_ws
 from live_service import run_live_bridge
 from prompts import NARRATOR_PROMPT, QUIET_MODE_SUFFIX
 
@@ -33,13 +34,15 @@ async def health() -> dict:
 
 
 @app.get("/sessions")
-async def sessions_index() -> dict:
-    return {"sessions": sessions.list_sessions()}
+async def sessions_index(authorization: str | None = Header(default=None)) -> dict:
+    uid = require_uid(authorization)
+    return {"sessions": sessions.list_sessions(uid)}
 
 
 @app.get("/sessions/{session_id}")
-async def session_detail(session_id: str) -> dict:
-    data = sessions.get_session(session_id)
+async def session_detail(session_id: str, authorization: str | None = Header(default=None)) -> dict:
+    uid = require_uid(authorization)
+    data = sessions.get_session(session_id, uid)
     if data is None:
         raise HTTPException(status_code=404, detail="session not found")
     return data
@@ -49,7 +52,8 @@ async def session_detail(session_id: str) -> dict:
 async def ws_live(websocket: WebSocket):
     """Live commentary over a Gemini Live session.
 
-    The first client message must be {"type": "start", "mode": <mode>};
+    The first client message must be
+    {"type": "start", "mode": <mode>, "token": <firebase_id_token>};
     everything after that is handled by the live bridge.
     """
     await websocket.accept()
@@ -65,7 +69,11 @@ async def ws_live(websocket: WebSocket):
         await websocket.close()
         return
 
-    session_id = sessions.create_session()
+    uid = await require_uid_ws(websocket, start.get("token"))
+    if uid is None:
+        return
+
+    session_id = sessions.create_session(uid)
     logger.info("Starting live session %s", session_id)
     await websocket.send_json({"type": "session", "id": session_id})
 

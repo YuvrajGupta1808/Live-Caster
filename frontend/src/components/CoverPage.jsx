@@ -1,6 +1,6 @@
 // Minimal cover page: wordmark, one line, start.
 
-export default function CoverPage({ onStart, onHistory, hasHistory, theme, onToggleTheme, quiet, onToggleQuiet }) {
+export default function CoverPage({ onStart, onHistory, hasHistory, theme, onToggleTheme, quiet, onToggleQuiet, onSignOut }) {
   return (
     <div className="h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-100 flex flex-col transition-colors">
       <header className="flex items-center justify-between px-8 py-6">
@@ -23,6 +23,12 @@ export default function CoverPage({ onStart, onHistory, hasHistory, theme, onTog
             className="w-9 h-9 rounded-full border border-zinc-300 dark:border-zinc-700 flex items-center justify-center hover:border-yellow-500 dark:hover:border-yellow-400 transition-colors"
           >
             {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+          <button
+            onClick={onSignOut}
+            className="text-sm text-zinc-500 hover:text-yellow-600 dark:hover:text-yellow-400 transition-colors"
+          >
+            Sign out
           </button>
         </div>
       </header>

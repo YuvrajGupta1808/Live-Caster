@@ -1,3 +1,5 @@
+import { getIdToken } from './firebase';
+
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/live';
 
 // Thin wrapper around the /ws/live WebSocket. Sends {start, frame, stop}
@@ -12,8 +14,9 @@ export class LiveSession {
     connect() {
         this.ws = new WebSocket(WS_URL);
 
-        this.ws.onopen = () => {
-            this.ws.send(JSON.stringify({ type: 'start', quiet: this.quiet }));
+        this.ws.onopen = async () => {
+            const token = await getIdToken();
+            this.ws.send(JSON.stringify({ type: 'start', quiet: this.quiet, token }));
         };
 
         this.ws.onmessage = (event) => {

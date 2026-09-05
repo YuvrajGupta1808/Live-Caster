@@ -1,61 +1,56 @@
-"""File-backed session store.
+"""Firestore-backed session store.
 
-Each live session is one JSON file under backend/sessions/ holding the
-mode, start time, and the finalized transcript entries (narrator lines,
-user speech, tool calls). Plain files keep the store dependency-free and
-easy to inspect.
+Each live session is one document under the `sessions` collection holding
+the owner's uid, start time, and the finalized transcript entries (narrator
+lines, user speech, tool calls).
 """
 
-import json
 import time
 import uuid
-from pathlib import Path
 
-SESSIONS_DIR = Path(__file__).resolve().parent / "sessions"
+from google.cloud import firestore
 
-
-def _path(session_id: str) -> Path:
-    return SESSIONS_DIR / f"{session_id}.json"
+_db = firestore.Client()
+_COLLECTION = "sessions"
 
 
-def create_session() -> str:
-    SESSIONS_DIR.mkdir(exist_ok=True)
+def create_session(uid: str) -> str:
     session_id = uuid.uuid4().hex[:12]
-    _path(session_id).write_text(json.dumps({
+    _db.collection(_COLLECTION).document(session_id).set({
         "id": session_id,
+        "uid": uid,
         "started_at": time.time(),
         "entries": [],
-    }))
+    })
     return session_id
 
 
 def append_entry(session_id: str, kind: str, text: str) -> None:
     """Append one finalized transcript entry. kind: model | user | tool."""
-    path = _path(session_id)
-    if not path.exists():
-        return
-    data = json.loads(path.read_text())
-    data["entries"].append({"kind": kind, "text": text, "ts": time.time()})
-    path.write_text(json.dumps(data))
+    doc_ref = _db.collection(_COLLECTION).document(session_id)
+    doc_ref.update({
+        "entries": firestore.ArrayUnion([
+            {"kind": kind, "text": text, "ts": time.time()}
+        ])
+    })
 
 
-def get_session(session_id: str) -> dict | None:
-    path = _path(session_id)
-    if not path.exists():
+def get_session(session_id: str, uid: str) -> dict | None:
+    doc = _db.collection(_COLLECTION).document(session_id).get()
+    if not doc.exists:
         return None
-    return json.loads(path.read_text())
+    data = doc.to_dict()
+    if data.get("uid") != uid:
+        return None
+    return data
 
 
-def list_sessions() -> list[dict]:
+def list_sessions(uid: str) -> list[dict]:
     """Newest-first summaries: id, started_at, line count, preview."""
-    if not SESSIONS_DIR.exists():
-        return []
+    docs = _db.collection(_COLLECTION).where(filter=firestore.FieldFilter("uid", "==", uid)).stream()
     summaries = []
-    for path in SESSIONS_DIR.glob("*.json"):
-        try:
-            data = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            continue
+    for doc in docs:
+        data = doc.to_dict()
         entries = data.get("entries", [])
         if not entries:
             continue  # empty sessions are noise, not history
