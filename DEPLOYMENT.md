@@ -15,7 +15,10 @@ changes don't have to rediscover this context.
 | Service | URL | Purpose |
 |---|---|---|
 | `live-caster-backend` | https://live-caster-backend-165409365963.us-central1.run.app | FastAPI + WebSocket bridge to Gemini Live |
-| `live-caster-frontend` | https://live-caster-frontend-165409365963.us-central1.run.app | Static Vite build, served by nginx |
+| `live-caster-frontend` | https://livecaster.yuvrajgupta.com | Static Vite build, served by nginx |
+
+The frontend's `*.run.app` URL still works; the custom domain is the
+primary entry point.
 
 Both built via `gcloud run deploy --source .` (backend) and a
 `cloudbuild.yaml` + `gcloud builds submit` → `gcloud run deploy --image`
@@ -103,4 +106,35 @@ Both built via `gcloud run deploy --source .` (backend) and a
   instance's concurrency). Fine for personal use; raise it (and confirm
   the WebSocket bridge handles concurrent sessions cleanly) if you expect
   more than one simultaneous user.
-- No custom domain — using the default `*.run.app` URLs.
+- The backend still uses its `*.run.app` URL (only the frontend has a
+  custom domain). If the backend ever gets one, the frontend's
+  `VITE_API_URL`/`VITE_WS_URL` build args must be rebuilt to match — they
+  are baked in at build time, not read at runtime.
+
+## Custom domain
+
+`livecaster.yuvrajgupta.com` → `live-caster-frontend`, via a Cloud Run
+**domain mapping** (free; no load balancer, so nothing added to the
+monthly spend). Chosen over a Global External Load Balancer specifically
+to avoid ~$18/month in fixed cost against the $50 budget.
+
+DNS lives with the domain registrar (Squarespace/Google Domains —
+nameservers are `ns-cloud-d*.googledomains.com`, **not** a Cloud DNS zone
+in any of these projects, so `gcloud dns` cannot manage it). One record
+does the work:
+
+| Type | Host | Value |
+|---|---|---|
+| CNAME | `livecaster` | `ghs.googlehosted.com.` |
+
+The apex (`yuvrajgupta.com`) and `www` (which points at Vercel) are
+untouched by this. Domain ownership was already verified for the account,
+so no TXT verification step was needed.
+
+Two places must list the custom domain or sign-in and API calls break —
+both are already configured, but they're easy to forget if the domain
+changes:
+
+- Firebase Auth **authorized domains** (else email-link sign-in fails with
+  `auth/unauthorized-domain`).
+- The backend's `LIVECASTER_ALLOWED_ORIGINS` env var (CORS).

@@ -85,6 +85,14 @@ Vertex AI `us-central1`, three consecutive frames):
 
 The UI displays time-to-first-word live for every line.
 
+## Live App
+
+**https://livecaster.yuvrajgupta.com** — sign in with a one-time email
+link, then hit Start and share a window.
+
+Deployed on Google Cloud Run; see [DEPLOYMENT.md](DEPLOYMENT.md) for the
+infrastructure and the reasoning behind it.
+
 ## Quick Start
 
 Backend:
