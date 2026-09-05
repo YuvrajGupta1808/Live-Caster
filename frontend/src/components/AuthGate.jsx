@@ -34,6 +34,10 @@ export default function AuthGate({ theme }) {
             We sent a sign-in link to <strong>{email}</strong>. Open it on
             this device to continue.
           </p>
+          <p className="mt-4 text-sm text-zinc-400 dark:text-zinc-500">
+            Not there? Check your spam folder — new senders often land
+            there.
+          </p>
         </div>
       ) : (
         <form onSubmit={submit} className="w-full max-w-sm text-center">
