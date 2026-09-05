@@ -1,4 +1,4 @@
-const WS_URL = 'ws://localhost:8000/ws/live';
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/live';
 
 // Thin wrapper around the /ws/live WebSocket. Sends {start, frame, stop}
 // messages and surfaces every server event through onEvent({type, ...}).
