@@ -10,3 +10,6 @@ backend/*.pyc
 __pycache__/
 *.pyc
 backend/sessions/
+
+# Local tooling
+.claude/

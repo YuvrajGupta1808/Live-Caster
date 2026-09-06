@@ -1,0 +1,40 @@
+\usepackage{tikz}
+\usepackage{float}
+\usetikzlibrary{arrows.meta, positioning, calc, fit, backgrounds}
+
+% Document accent palette, matched to the title page.
+\definecolor{lcslate}{HTML}{1F2833}
+\definecolor{lcrule}{HTML}{8899AA}
+\definecolor{lcink}{HTML}{2B3038}
+\definecolor{lcmuted}{HTML}{6E757F}
+\definecolor{lcpanel}{HTML}{F2F4F6}
+\definecolor{lcup}{HTML}{31506E}
+\definecolor{lcdown}{HTML}{4A6152}
+
+% Shared node styles so all three figures read as one system.
+\tikzset{
+  lcbox/.style={
+    draw=lcrule, line width=0.5pt, fill=white,
+    rounded corners=1pt, align=center,
+    inner xsep=7pt, inner ysep=6pt,
+    font=\sffamily\footnotesize
+  },
+  lcstage/.style={
+    lcbox, fill=lcpanel, minimum width=30mm
+  },
+  lclabel/.style={
+    font=\sffamily\scriptsize, text=lcmuted, align=center
+  },
+  lcflow/.style={
+    -{Stealth[length=4pt, width=3pt]},
+    draw=lcup, line width=0.6pt
+  },
+  lcback/.style={
+    -{Stealth[length=4pt, width=3pt]},
+    draw=lcdown, line width=0.6pt
+  },
+  lcthin/.style={
+    -{Stealth[length=4pt, width=3pt]},
+    draw=lcmuted, line width=0.5pt
+  }
+}
