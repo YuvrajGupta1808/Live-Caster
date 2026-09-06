@@ -6,14 +6,24 @@ that keeps the app from being used (and its Gemini quota burned) by anyone
 who merely has the URL.
 """
 
+import firebase_admin
 from fastapi import HTTPException, WebSocket
-from firebase_admin import auth, initialize_app
+from firebase_admin import auth
 
-initialize_app()
+
+def _ensure_app() -> None:
+    """Initialize the Firebase app once, on first use.
+
+    Deferred so importing this module needs no credentials — tests and
+    tooling can import the app without touching Firebase.
+    """
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app()
 
 
 def verify_id_token(token: str) -> str:
     """Returns the caller's uid, or raises if the token is missing/invalid."""
+    _ensure_app()
     try:
         decoded = auth.verify_id_token(token)
     except Exception as exc:

@@ -10,13 +10,25 @@ import uuid
 
 from google.cloud import firestore
 
-_db = firestore.Client()
 _COLLECTION = "sessions"
+_client = None
+
+
+def _db():
+    """The Firestore client, created on first use.
+
+    Built lazily so importing this module needs no credentials — tests and
+    tooling can import the app without touching Google Cloud.
+    """
+    global _client
+    if _client is None:
+        _client = firestore.Client()
+    return _client
 
 
 def create_session(uid: str) -> str:
     session_id = uuid.uuid4().hex[:12]
-    _db.collection(_COLLECTION).document(session_id).set({
+    _db().collection(_COLLECTION).document(session_id).set({
         "id": session_id,
         "uid": uid,
         "started_at": time.time(),
@@ -27,7 +39,7 @@ def create_session(uid: str) -> str:
 
 def append_entry(session_id: str, kind: str, text: str) -> None:
     """Append one finalized transcript entry. kind: model | user | tool."""
-    doc_ref = _db.collection(_COLLECTION).document(session_id)
+    doc_ref = _db().collection(_COLLECTION).document(session_id)
     doc_ref.update({
         "entries": firestore.ArrayUnion([
             {"kind": kind, "text": text, "ts": time.time()}
@@ -36,7 +48,7 @@ def append_entry(session_id: str, kind: str, text: str) -> None:
 
 
 def get_session(session_id: str, uid: str) -> dict | None:
-    doc = _db.collection(_COLLECTION).document(session_id).get()
+    doc = _db().collection(_COLLECTION).document(session_id).get()
     if not doc.exists:
         return None
     data = doc.to_dict()
@@ -47,7 +59,9 @@ def get_session(session_id: str, uid: str) -> dict | None:
 
 def list_sessions(uid: str) -> list[dict]:
     """Newest-first summaries: id, started_at, line count, preview."""
-    docs = _db.collection(_COLLECTION).where(filter=firestore.FieldFilter("uid", "==", uid)).stream()
+    docs = _db().collection(_COLLECTION).where(
+        filter=firestore.FieldFilter("uid", "==", uid)
+    ).stream()
     summaries = []
     for doc in docs:
         data = doc.to_dict()
