@@ -18,8 +18,12 @@ say appears as live captions.
 This project won 3rd prize at the Google DeepMind x Cerebral Valley Gemini
 Hackathon.
 
-<!-- TODO: 15-second demo GIF here — live narration appearing over a shared
-     screen, caption noting the audio narration. -->
+![Live Caster narrating a shared browser window, answering a spoken
+question, and running a Google Search — all in one session](docs/demo.gif)
+
+*Narrating a shared window, then answering a spoken question about it and
+searching the web mid-session. The voice is native audio from the model —
+these captions are the transcript of what you'd hear.*
 
 ## How It Works
 
